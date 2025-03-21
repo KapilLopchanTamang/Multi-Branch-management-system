@@ -209,4 +209,3 @@ $branches = $stmt->get_result();
   </script>
 </body>
 </html>
-
