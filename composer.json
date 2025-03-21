@@ -1,7 +1,8 @@
 {
     "require": {
-        "twilio/sdk": "^6.44"
+        "twilio/sdk": "^6.44",
+        "endroid/qr-code": "^6.0",
+        "bacon/bacon-qr-code": "^3.0"
         
     }
 }
-               

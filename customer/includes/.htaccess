@@ -1,0 +1,13 @@
+RewriteEngine On
+
+# Skip rewrite for directories and existing files
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME} !-f
+
+# Rewrite URLs to automatically append .php if the requested file doesn't exist
+RewriteRule ^([a-zA-Z0-9_-]+)$ $1.php [L]
+
+# Optionally, you can redirect old .php URLs to clean URLs
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^(.*)\.php$ /$1 [R=301,L]
