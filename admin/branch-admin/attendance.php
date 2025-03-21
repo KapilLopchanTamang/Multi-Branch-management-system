@@ -31,6 +31,9 @@ if (!isset($_SESSION['admin_branch_id']) || !isset($_SESSION['admin_branch_name'
 
 $branch_name = $admin['branch_name'];
 
+// First, let's modify the database check to ensure the attendance table has the admin_override column
+// Find this section near the beginning of the file (around line 40-60)
+
 // Check if attendance table exists, if not create it
 $result = $conn->query("SHOW TABLES LIKE 'attendance'");
 if ($result->num_rows == 0) {
@@ -45,33 +48,52 @@ if ($result->num_rows == 0) {
             $result->free();
         }
     }
+} else {
+    // Check if admin_override column exists in attendance table
+    $result = $conn->query("SHOW COLUMNS FROM attendance LIKE 'admin_override'");
+    if ($result->num_rows == 0) {
+        // Add admin_override column if it doesn't exist
+        $conn->query("ALTER TABLE attendance ADD COLUMN admin_override TINYINT(1) DEFAULT 0 AFTER notes");
+    }
 }
 
-// Auto checkout customers who have been checked in for too long
-$stmt = $conn->prepare("SELECT id FROM attendance_settings WHERE branch = ?");
+// Get attendance settings for this branch
+$stmt = $conn->prepare("SELECT * FROM attendance_settings WHERE branch = ?");
 $stmt->bind_param("s", $branch_name);
 $stmt->execute();
 $result = $stmt->get_result();
 
 if ($result->num_rows > 0) {
     $settings = $result->fetch_assoc();
+    $max_entries_per_day = $settings['max_entries_per_day'] ?? 1;
     $auto_checkout_after = $settings['auto_checkout_after'] ?? 180; // Default 3 hours
-    
-    // Auto checkout customers who have been checked in for longer than the setting
-    $stmt = $conn->prepare("UPDATE attendance 
-                          SET check_out = NOW(), 
-                              notes = CONCAT(IFNULL(notes, ''), ' | Auto checked-out by system') 
-                          WHERE branch = ? 
-                          AND check_out IS NULL 
-                          AND TIMESTAMPDIFF(MINUTE, check_in, NOW()) > ?");
-    $stmt->bind_param("si", $branch_name, $auto_checkout_after);
-    $stmt->execute();
+} else {
+    // Default settings if not found
+    $max_entries_per_day = 1;
+    $auto_checkout_after = 180; // 3 hours in minutes
 }
+
+// Auto checkout customers who have been checked in for too long
+$stmt = $conn->prepare("UPDATE attendance 
+                      SET check_out = NOW(), 
+                          notes = CONCAT(IFNULL(notes, ''), ' | Auto checked-out by system') 
+                      WHERE branch = ? 
+                      AND check_out IS NULL 
+                      AND TIMESTAMPDIFF(MINUTE, check_in, NOW()) > ?");
+$stmt->bind_param("si", $branch_name, $auto_checkout_after);
+$stmt->execute();
+
+// Initialize selected date
+$selected_date = isset($_GET['date']) ? $_GET['date'] : date('Y-m-d');
+
+// Now let's fix the check-in form submission to handle the case when admin_override is not set
+// Find the check-in request handler (around line 80-130)
 
 // Handle check-in request
 if (isset($_POST['check_in']) && !empty($_POST['customer_id'])) {
     $customer_id = intval($_POST['customer_id']);
     $notes = isset($_POST['notes']) ? filter_var($_POST['notes'], FILTER_SANITIZE_STRING) : '';
+    $admin_override = isset($_POST['admin_override']) && $_POST['admin_override'] == 1 ? 1 : 0;
     
     // Check if customer belongs to this branch
     $stmt = $conn->prepare("SELECT id FROM customers WHERE id = ? AND branch = ?");
@@ -80,27 +102,75 @@ if (isset($_POST['check_in']) && !empty($_POST['customer_id'])) {
     $result = $stmt->get_result();
     
     if ($result->num_rows > 0) {
-        // Check if customer already checked in today and hasn't checked out
-        $stmt = $conn->prepare("SELECT id FROM attendance WHERE customer_id = ? AND branch = ? AND DATE(check_in) = CURDATE() AND check_out IS NULL");
+        // Check how many times the customer has checked in today
+        $stmt = $conn->prepare("SELECT COUNT(*) as check_in_count FROM attendance 
+                              WHERE customer_id = ? AND branch = ? AND DATE(check_in) = CURDATE()");
         $stmt->bind_param("is", $customer_id, $branch_name);
         $stmt->execute();
         $result = $stmt->get_result();
+        $check_in_data = $result->fetch_assoc();
+        $check_in_count = $check_in_data['check_in_count'];
         
-        if ($result->num_rows > 0) {
-            // Customer already checked in
+        // Check if customer already has an active check-in (not checked out)
+        $stmt = $conn->prepare("SELECT id FROM attendance 
+                              WHERE customer_id = ? AND branch = ? AND DATE(check_in) = CURDATE() AND check_out IS NULL");
+        $stmt->bind_param("is", $customer_id, $branch_name);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $active_check_in = $result->num_rows > 0;
+        
+        if ($active_check_in) {
+            // Customer already checked in and hasn't checked out
             $_SESSION['attendance_message'] = "Customer already checked in today and hasn't checked out.";
             $_SESSION['attendance_message_type'] = "error";
+        } else if ($check_in_count >= $max_entries_per_day && !$admin_override) {
+            // Customer has reached max check-ins for the day and no admin override
+            $_SESSION['attendance_message'] = "Customer has already checked in " . $check_in_count . " time(s) today. Admin override required for additional check-ins.";
+            $_SESSION['attendance_message_type'] = "error";
+            $_SESSION['show_override'] = true;
+            $_SESSION['override_customer_id'] = $customer_id;
         } else {
-            // Insert check-in record
-            $stmt = $conn->prepare("INSERT INTO attendance (customer_id, check_in, branch, created_by, notes) VALUES (?, NOW(), ?, ?, ?)");
-            $stmt->bind_param("isis", $customer_id, $branch_name, $admin_id, $notes);
-            
-            if ($stmt->execute()) {
-                $_SESSION['attendance_message'] = "Check-in recorded successfully!";
-                $_SESSION['attendance_message_type'] = "success";
-            } else {
-                $_SESSION['attendance_message'] = "Error recording check-in: " . $conn->error;
-                $_SESSION['attendance_message_type'] = "error";
+            // Prepare the SQL statement with admin_override parameter
+            try {
+                // Insert check-in record
+                $stmt = $conn->prepare("INSERT INTO attendance (customer_id, check_in, branch, created_by, notes, admin_override) 
+                                      VALUES (?, NOW(), ?, ?, ?, ?)");
+                $stmt->bind_param("isisi", $customer_id, $branch_name, $admin_id, $notes, $admin_override);
+                
+                if ($stmt->execute()) {
+                    if ($admin_override) {
+                        $_SESSION['attendance_message'] = "Check-in recorded successfully with admin override!";
+                    } else {
+                        $_SESSION['attendance_message'] = "Check-in recorded successfully!";
+                    }
+                    $_SESSION['attendance_message_type'] = "success";
+                    unset($_SESSION['show_override']);
+                    unset($_SESSION['override_customer_id']);
+                } else {
+                    $_SESSION['attendance_message'] = "Error recording check-in: " . $conn->error;
+                    $_SESSION['attendance_message_type'] = "error";
+                }
+            } catch (Exception $e) {
+                // Handle the exception if the admin_override column doesn't exist
+                // Try again without the admin_override column
+                try {
+                    $stmt = $conn->prepare("INSERT INTO attendance (customer_id, check_in, branch, created_by, notes) 
+                                          VALUES (?, NOW(), ?, ?, ?)");
+                    $stmt->bind_param("isis", $customer_id, $branch_name, $admin_id, $notes);
+                    
+                    if ($stmt->execute()) {
+                        $_SESSION['attendance_message'] = "Check-in recorded successfully!";
+                        $_SESSION['attendance_message_type'] = "success";
+                        unset($_SESSION['show_override']);
+                        unset($_SESSION['override_customer_id']);
+                    } else {
+                        $_SESSION['attendance_message'] = "Error recording check-in: " . $conn->error;
+                        $_SESSION['attendance_message_type'] = "error";
+                    }
+                } catch (Exception $innerEx) {
+                    $_SESSION['attendance_message'] = "Error recording check-in: " . $innerEx->getMessage();
+                    $_SESSION['attendance_message_type'] = "error";
+                }
             }
         }
     } else {
@@ -146,19 +216,41 @@ if (isset($_POST['check_out']) && !empty($_POST['attendance_id'])) {
     exit();
 }
 
-// Get today's date or selected date
-$selected_date = isset($_GET['date']) ? $_GET['date'] : date('Y-m-d');
+// Fix the attendance records query to handle the case when admin_override column doesn't exist
+// Find the query that gets attendance records (around line 200-210)
 
 // Get attendance records for the selected date
-$stmt = $conn->prepare("SELECT a.id, a.customer_id, a.check_in, a.check_out, a.notes, 
-                      c.first_name, c.last_name, c.email, c.phone 
-                      FROM attendance a 
-                      JOIN customers c ON a.customer_id = c.id 
-                      WHERE a.branch = ? AND DATE(a.check_in) = ? 
-                      ORDER BY a.check_in DESC");
-$stmt->bind_param("ss", $branch_name, $selected_date);
-$stmt->execute();
-$attendance_records = $stmt->get_result();
+try {
+    $stmt = $conn->prepare("SELECT a.id, a.customer_id, a.check_in, a.check_out, a.notes, 
+                          IFNULL(a.admin_override, 0) as admin_override,
+                          c.first_name, c.last_name, c.email, c.phone 
+                          FROM attendance a 
+                          JOIN customers c ON a.customer_id = c.id 
+                          WHERE a.branch = ? AND DATE(a.check_in) = ? 
+                          ORDER BY a.check_in DESC");
+    $stmt->bind_param("ss", $branch_name, $selected_date);
+    $stmt->execute();
+    $attendance_records = $stmt->get_result();
+} catch (Exception $e) {
+    // If admin_override column doesn't exist, try without it
+    try {
+        $stmt = $conn->prepare("SELECT a.id, a.customer_id, a.check_in, a.check_out, a.notes,
+                              0 as admin_override,
+                              c.first_name, c.last_name, c.email, c.phone 
+                              FROM attendance a 
+                              JOIN customers c ON a.customer_id = c.id 
+                              WHERE a.branch = ? AND DATE(a.check_in) = ? 
+                              ORDER BY a.check_in DESC");
+        $stmt->bind_param("ss", $branch_name, $selected_date);
+        $stmt->execute();
+        $attendance_records = $stmt->get_result();
+    } catch (Exception $innerEx) {
+        // If there's still an error, create an empty result set
+        $attendance_records = new mysqli_result();
+        $_SESSION['attendance_message'] = "Error loading attendance records: " . $innerEx->getMessage();
+        $_SESSION['attendance_message_type'] = "error";
+    }
+}
 
 // Get all customers for this branch for the check-in form
 $stmt = $conn->prepare("SELECT id, first_name, last_name, email FROM customers WHERE branch = ? ORDER BY first_name, last_name");
@@ -508,6 +600,57 @@ $stats = $stmt->get_result()->fetch_assoc();
             background-color: #eee;
         }
         
+        .admin-override-box {
+            background-color: #fff3cd;
+            border: 1px solid #ffeeba;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+        
+        .admin-override-box h4 {
+            color: #856404;
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        
+        .admin-override-box p {
+            color: #856404;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        
+        .admin-override-checkbox {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .admin-override-checkbox input {
+            margin-right: 10px;
+        }
+        
+        .admin-override-checkbox label {
+            font-weight: 600;
+            color: #856404;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 5px;
+        }
+        
+        .badge-warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+        
         @media (max-width: 992px) {
             .attendance-container {
                 flex-direction: column;
@@ -565,7 +708,7 @@ $stats = $stmt->get_result()->fetch_assoc();
                     <li class="active"><a href="attendance.php"><i class="fas fa-clipboard-check"></i> Attendance</a></li>
                     <li><a href="#"><i class="fas fa-calendar-alt"></i> Classes</a></li>
                     <li><a href="#"><i class="fas fa-dumbbell"></i> Equipment</a></li>
-                    <li><a href="#"><i class="fas fa-cog"></i> Settings</a></li>
+                    <li><a href="attendance_settings.php"><i class="fas fa-cog"></i> Settings</a></li>
                     <li><a href="../logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
                 </ul>
             </div>
@@ -602,14 +745,22 @@ $stats = $stmt->get_result()->fetch_assoc();
                             <form action="attendance.php" method="post">
                                 <div class="form-group">
                                     <label for="customer_id">Select Customer</label>
-                                    <select id="customer_id" name="customer_id" required class="form-control">
+                                    <select id="customer_id" name="customer_id" required class="form-control" <?php if (isset($_SESSION['override_customer_id'])) echo 'disabled'; ?>>
                                         <option value="">-- Select Customer --</option>
-                                        <?php while ($customer = $customers->fetch_assoc()): ?>
-                                            <option value="<?php echo $customer['id']; ?>">
+                                        <?php 
+                                        // Reset the customers result pointer
+                                        $customers->data_seek(0);
+                                        while ($customer = $customers->fetch_assoc()): 
+                                            $selected = (isset($_SESSION['override_customer_id']) && $_SESSION['override_customer_id'] == $customer['id']) ? 'selected' : '';
+                                        ?>
+                                            <option value="<?php echo $customer['id']; ?>" <?php echo $selected; ?>>
                                                 <?php echo htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name'] . ' (' . $customer['email'] . ')'); ?>
                                             </option>
                                         <?php endwhile; ?>
                                     </select>
+                                    <?php if (isset($_SESSION['override_customer_id'])): ?>
+                                        <input type="hidden" name="customer_id" value="<?php echo $_SESSION['override_customer_id']; ?>">
+                                    <?php endif; ?>
                                 </div>
                                 
                                 <div class="form-group">
@@ -617,6 +768,18 @@ $stats = $stmt->get_result()->fetch_assoc();
                                     <textarea id="notes" name="notes" rows="3" class="form-control" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; resize: vertical;"></textarea>
                                     <small style="color: #777; font-size: 12px; margin-top: 5px; display: block;">Add any relevant information about this check-in</small>
                                 </div>
+                                
+                                <?php if (isset($_SESSION['show_override']) && $_SESSION['show_override']): ?>
+                                    <div class="admin-override-box">
+                                        <h4><i class="fas fa-exclamation-triangle"></i> Admin Override Required</h4>
+                                        <p>This customer has already reached the maximum check-ins for today (<?php echo $max_entries_per_day; ?>). 
+                                           As an admin, you can override this restriction.</p>
+                                        <div class="admin-override-checkbox">
+                                            <input type="checkbox" id="admin_override" name="admin_override" value="1">
+                                            <label for="admin_override">I authorize this additional check-in</label>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
                                 
                                 <button type="submit" name="check_in" class="action-btn check-in">
                                     <i class="fas fa-sign-in-alt"></i> Check-In
@@ -650,6 +813,21 @@ $stats = $stmt->get_result()->fetch_assoc();
                             </div>
                         </div>
                         
+                        <!-- Attendance Settings Info -->
+                        <div class="stats-card">
+                            <h3><i class="fas fa-info-circle"></i> Attendance Settings</h3>
+                            <div style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                                <p><strong>Current Settings:</strong></p>
+                                <ul style="margin-top: 10px; padding-left: 20px;">
+                                    <li>Maximum check-ins per day: <span style="font-weight: 600;"><?php echo $max_entries_per_day; ?></span></li>
+                                    <li>Auto checkout after: <span style="font-weight: 600;"><?php echo $auto_checkout_after; ?> minutes</span></li>
+                                </ul>
+                                <p style="margin-top: 10px; font-size: 13px; color: #666;">
+                                    <i class="fas fa-cog"></i> You can change these settings in the <a href="attendance_settings.php" style="color: #ff6b45; text-decoration: none;">Attendance Settings</a> page.
+                                </p>
+                            </div>
+                        </div>
+                        
                         <!-- Attendance Statistics -->
                         <div class="stats-card">
                             <h3><i class="fas fa-chart-bar"></i> Attendance Statistics</h3>
@@ -679,7 +857,7 @@ $stats = $stmt->get_result()->fetch_assoc();
                         <div class="date-navigation">
                             <div class="date-picker">
                                 <form action="attendance.php" method="get" id="dateForm">
-                                    <input type="date" name="date" id="date" value="<?php echo $selected_date; ?>" onchange="document.getElementById('dateForm').submit();">
+                                    <input type="date" name="date" id="date" value="<?php echo htmlspecialchars($selected_date); ?>" onchange="document.getElementById('dateForm').submit();">
                                 </form>
                             </div>
                             <div class="date-nav-buttons">
@@ -723,6 +901,16 @@ $stats = $stmt->get_result()->fetch_assoc();
                             </div>
                         </div>
                         
+                        // Add this debugging code right before the attendance records table (around line 580)
+                        <!-- Debug Info -->
+                        <?php if (isset($_SESSION['debug_info'])): ?>
+                            <div style="background-color: #f8d7da; color: #721c24; padding: 10px; margin-bottom: 10px; border-radius: 4px;">
+                                <h4>Debug Info:</h4>
+                                <pre><?php echo $_SESSION['debug_info']; ?></pre>
+                            </div>
+                            <?php unset($_SESSION['debug_info']); ?>
+                        <?php endif; ?>
+
                         <!-- Attendance Records -->
                         <div class="section">
                             <div class="section-header">
@@ -763,12 +951,21 @@ $stats = $stmt->get_result()->fetch_assoc();
                                                     $hours = floor($total_minutes / 60);
                                                     $minutes = $total_minutes % 60;
                                                     $duration_text = sprintf('%d hr %d min (ongoing)', $hours, $minutes);
+                                                    
+                                                    // Check if auto-checkout will happen soon
+                                                    $minutes_until_auto_checkout = $auto_checkout_after - $total_minutes;
+                                                    if ($minutes_until_auto_checkout > 0 && $minutes_until_auto_checkout <= 30) {
+                                                        $duration_text .= ' <span style="color: #f44336; font-size: 11px;">(Auto checkout in ' . $minutes_until_auto_checkout . ' min)</span>';
+                                                    }
                                                 }
                                                 ?>
                                                 <tr>
                                                     <td>
                                                         <div class="customer-details">
                                                             <?php echo htmlspecialchars($record['first_name'] . ' ' . $record['last_name']); ?>
+                                                            <?php if ($record['admin_override']): ?>
+                                                                <span class="badge badge-warning">Override</span>
+                                                            <?php endif; ?>
                                                         </div>
                                                     </td>
                                                     <td><?php echo $check_in_time->format('h:i A'); ?></td>
@@ -1180,42 +1377,52 @@ $stats = $stmt->get_result()->fetch_assoc();
             }
         }
 
-        function checkInCustomer(customerId) {
-            // Set the customer ID in the select dropdown
-            const customerSelect = document.getElementById('customer_id');
-            
-            // Verify the customer ID exists in the dropdown
-            let customerExists = false;
-            let customerName = "Unknown";
-            
-            for (let i = 0; i < customerSelect.options.length; i++) {
-                if (customerSelect.options[i].value == customerId) {
-                    customerExists = true;
-                    customerName = customerSelect.options[i].text;
-                    customerSelect.selectedIndex = i;
-                    break;
-                }
-            }
-            
-            if (!customerExists) {
-                scanStatus.textContent = "Error: Customer ID not found in this branch";
-                return false;
-            }
-            
-            // Add a note that this was a QR code check-in
-            document.getElementById('notes').value = "Checked in via QR code scanner";
-            
-            // Update the UI
-            scannedCustomerName.textContent = customerName;
-            scanStatus.textContent = "Processing check-in...";
-            
-            // Submit the check-in form
-            setTimeout(() => {
-                document.querySelector('button[name="check_in"]').click();
-            }, 1000);
-            
-            return true;
+// Fix the QR scanner functionality
+// Find the checkInCustomer function in the JavaScript section and replace it with this improved version:
+
+function checkInCustomer(customerId) {
+    // Set the customer ID in the select dropdown
+    const customerSelect = document.getElementById('customer_id');
+    
+    // Verify the customer ID exists in the dropdown
+    let customerExists = false;
+    let customerName = "Unknown";
+    
+    for (let i = 0; i < customerSelect.options.length; i++) {
+        if (customerSelect.options[i].value == customerId) {
+            customerExists = true;
+            customerName = customerSelect.options[i].text;
+            customerSelect.selectedIndex = i;
+            break;
         }
+    }
+    
+    if (!customerExists) {
+        scanStatus.textContent = "Error: Customer ID not found in this branch";
+        return false;
+    }
+    
+    // Add a note that this was a QR code check-in
+    document.getElementById('notes').value = "Checked in via QR code scanner";
+    
+    // Update the UI
+    scannedCustomerName.textContent = customerName;
+    scanStatus.textContent = "Processing check-in...";
+    
+    // Check if admin override checkbox exists and is needed
+    const adminOverrideCheckbox = document.getElementById('admin_override');
+    if (adminOverrideCheckbox) {
+        // If override is needed, check the box automatically for QR scans
+        adminOverrideCheckbox.checked = true;
+    }
+    
+    // Submit the check-in form
+    setTimeout(() => {
+        document.querySelector('button[name="check_in"]').click();
+    }, 1000);
+    
+    return true;
+}
 
         // Function to generate QR code URL for a customer
         function generateCustomerQRCode(customerId) {

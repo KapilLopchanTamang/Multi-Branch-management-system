@@ -168,6 +168,7 @@ $busiest_hour = $stmt->get_result()->fetch_assoc();
     <link rel="stylesheet" href="../../assets/css/styles.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         .report-container {
             margin-bottom: 30px;
@@ -516,10 +517,7 @@ $busiest_hour = $stmt->get_result()->fetch_assoc();
                     
                     <!-- Chart -->
                     <div class="chart-container">
-                        <div class="chart-placeholder">
-                            <i class="fas fa-chart-bar"></i>
-                            <p>Attendance visualization will be displayed here</p>
-                        </div>
+                        <canvas id="attendanceChart"></canvas>
                     </div>
                     
                     <!-- Report Data -->
@@ -683,6 +681,214 @@ $busiest_hour = $stmt->get_result()->fetch_assoc();
             window.print();
         }
     </script>
+    <script>
+    // Prepare chart data based on report type
+    const reportType = '<?php echo $report_type; ?>';
+    let chartData = {
+        labels: [],
+        datasets: [{
+            label: 'Total Visits',
+            data: [],
+            backgroundColor: 'rgba(255, 107, 69, 0.5)',
+            borderColor: 'rgba(255, 107, 69, 1)',
+            borderWidth: 1
+        }, {
+            label: 'Unique Visitors',
+            data: [],
+            backgroundColor: 'rgba(54, 162, 235, 0.5)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 1
+        }]
+    };
+
+    // Populate chart data based on report type
+    <?php if ($report_data->num_rows > 0): ?>
+        <?php 
+        // Reset the result pointer to the beginning
+        $report_data->data_seek(0);
+        
+        // Prepare arrays to hold the data
+        $labels = [];
+        $totalVisits = [];
+        $uniqueVisitors = [];
+        
+        while ($row = $report_data->fetch_assoc()) {
+            if ($report_type === 'daily') {
+                $labels[] = date('M j', strtotime($row['date']));
+                $totalVisits[] = $row['total_visits'];
+                $uniqueVisitors[] = $row['unique_visitors'];
+            } elseif ($report_type === 'weekly') {
+                $labels[] = 'Week ' . date('W', strtotime($row['week_start']));
+                $totalVisits[] = $row['total_visits'];
+                $uniqueVisitors[] = $row['unique_visitors'];
+            } elseif ($report_type === 'monthly') {
+                $labels[] = $row['month_name'];
+                $totalVisits[] = $row['total_visits'];
+                $uniqueVisitors[] = $row['unique_visitors'];
+            } else { // customer report
+                $labels[] = $row['first_name'] . ' ' . $row['last_name'];
+                $totalVisits[] = $row['total_visits'];
+                // No unique visitors for customer report
+            }
+        }
+        
+        // Reset the result pointer again for the table display
+        $report_data->data_seek(0);
+        ?>
+        
+        // Set the chart data
+        chartData.labels = <?php echo json_encode($labels); ?>;
+        chartData.datasets[0].data = <?php echo json_encode($totalVisits); ?>;
+        <?php if ($report_type !== 'customer'): ?>
+            chartData.datasets[1].data = <?php echo json_encode($uniqueVisitors); ?>;
+        <?php else: ?>
+            // For customer report, we don't need the second dataset
+            chartData.datasets.pop();
+        <?php endif; ?>
+    <?php endif; ?>
+
+    // Create the chart
+    const ctx = document.getElementById('attendanceChart').getContext('2d');
+    const attendanceChart = new Chart(ctx, {
+        type: <?php echo $report_type === 'daily' ? "'line'" : "'bar'"; ?>,
+        data: chartData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Number of Visits'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: <?php 
+                            if ($report_type === 'daily') echo "'Date'";
+                            elseif ($report_type === 'weekly') echo "'Week'";
+                            elseif ($report_type === 'monthly') echo "'Month'";
+                            else echo "'Customer'";
+                        ?>
+                    }
+                }
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: <?php 
+                        if ($report_type === 'daily') echo "'Daily Attendance'";
+                        elseif ($report_type === 'weekly') echo "'Weekly Attendance'";
+                        elseif ($report_type === 'monthly') echo "'Monthly Attendance'";
+                        else echo "'Customer Attendance'";
+                    ?>,
+                    font: {
+                        size: 16
+                    }
+                },
+                legend: {
+                    position: 'top',
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            label += context.parsed.y;
+                            return label;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Add a second chart for time distribution if we have hourly data
+    <?php if ($report_type === 'daily' && isset($busiest_hour)): ?>
+    // Get hourly distribution data
+    <?php
+    $hourly_query = "SELECT HOUR(check_in) as hour, COUNT(*) as visit_count
+                    FROM attendance 
+                    WHERE branch = ? AND DATE(check_in) BETWEEN ? AND ?
+                    GROUP BY HOUR(check_in)
+                    ORDER BY HOUR(check_in)";
+    $stmt = $conn->prepare($hourly_query);
+    $stmt->bind_param("sss", $branch_name, $start_date, $end_date);
+    $stmt->execute();
+    $hourly_data = $stmt->get_result();
+    
+    $hours = [];
+    $counts = [];
+    
+    while ($row = $hourly_data->fetch_assoc()) {
+        // Convert 24-hour format to 12-hour format with AM/PM
+        $hour_display = date('g A', strtotime($row['hour'] . ':00'));
+        $hours[] = $hour_display;
+        $counts[] = $row['visit_count'];
+    }
+    ?>
+    
+    // Create a container for the hourly chart
+    const hourlyChartContainer = document.createElement('div');
+    hourlyChartContainer.className = 'chart-container';
+    hourlyChartContainer.style.marginTop = '20px';
+    
+    const hourlyCanvas = document.createElement('canvas');
+    hourlyCanvas.id = 'hourlyChart';
+    hourlyChartContainer.appendChild(hourlyCanvas);
+    
+    // Insert after the main chart
+    document.querySelector('.chart-container').after(hourlyChartContainer);
+    
+    // Create the hourly chart
+    const hourlyCtx = document.getElementById('hourlyChart').getContext('2d');
+    const hourlyChart = new Chart(hourlyCtx, {
+        type: 'bar',
+        data: {
+            labels: <?php echo json_encode($hours); ?>,
+            datasets: [{
+                label: 'Visits by Hour of Day',
+                data: <?php echo json_encode($counts); ?>,
+                backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Number of Visits'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Hour of Day'
+                    }
+                }
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Attendance by Time of Day',
+                    font: {
+                        size: 16
+                    }
+                }
+            }
+        }
+    });
+    <?php endif; ?>
+</script>
 </body>
 </html>
 
