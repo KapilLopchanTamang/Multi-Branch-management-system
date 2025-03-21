@@ -1,6 +1,6 @@
 <?php
 // Start session
-session_start();
+include 'includes/pageeffect.php';
 
 // Include database connection
 require_once '../includes/db_connect.php';
@@ -264,35 +264,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
     
     <!-- Main Content -->
     <div id="content-wrapper" class="ml-0 lg:ml-64 min-h-screen transition-all duration-300">
-        <!-- Top Navigation -->
-        <header class="bg-white shadow-sm">
-            <div class="flex justify-between items-center px-4 py-3 lg:px-6">
-                <h1 class="text-xl font-semibold text-gray-800">My Profile</h1>
-                <div class="flex items-center space-x-4">
-                    <div class="relative">
-                        <button class="p-1 text-gray-500 hover:text-gray-700 focus:outline-none">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
-                            </svg>
-                        </button>
-                        <span class="absolute top-0 right-0 h-2 w-2 rounded-full bg-primary"></span>
-                    </div>
-                    <div class="flex items-center">
-                        <span class="text-sm text-gray-700 mr-2 hidden sm:inline-block">
-                            <?php echo htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name']); ?>
-                        </span>
-                        <div class="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 overflow-hidden">
-                            <?php if (!empty($customer['profile_image'])): ?>
-                                <img src="<?php echo '../' . htmlspecialchars($customer['profile_image']); ?>" alt="Profile" class="h-full w-full object-cover">
-                            <?php else: ?>
-                                <?php echo strtoupper(substr($customer['first_name'], 0, 1)); ?>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </header>
-        
+      
+
         <!-- Profile Content -->
         <main class="p-4 lg:p-6">
             <?php if (!empty($success_message)): ?>

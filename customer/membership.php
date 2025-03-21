@@ -1,6 +1,6 @@
 <?php
 // Start session
-session_start();
+include 'includes/pageeffect.php';
 
 // Include database connection
 require_once '../includes/db_connect.php';

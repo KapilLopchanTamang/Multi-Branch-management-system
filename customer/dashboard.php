@@ -1,6 +1,6 @@
 <?php
 // Start session
-session_start();
+include 'includes/pageeffect.php';
 
 // Include database connection
 require_once '../includes/db_connect.php';
@@ -24,7 +24,16 @@ $stmt->execute();
 $result = $stmt->get_result();
 $customer = $result->fetch_assoc();
 
-
+// Calculate days remaining until membership expiry
+$days_remaining = 0;
+$is_expired = false;
+if (!empty($customer['end_date'])) {
+    $today = new DateTime();
+    $expiry_date = new DateTime($customer['end_date']);
+    $interval = $today->diff($expiry_date);
+    $days_remaining = $interval->days;
+    $is_expired = $today > $expiry_date;
+}
 
 // Get upcoming classes for this branch
 $stmt = $conn->prepare("SELECT * FROM classes WHERE branch = ? AND class_date >= CURDATE() ORDER BY class_date, start_time LIMIT 5");
@@ -57,13 +66,32 @@ while ($row = $attendance_data->fetch_assoc()) {
     <title>Dashboard | Gym Network</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        #head{
-            background-image:  repeating-radial-gradient(circle at 0 0, transparent 0, #ff6b45 100px), repeating-linear-gradient(#e74c3c, #ff6b45);
+        #head {
+            background-image: repeating-radial-gradient(circle at 0 0, transparent 0, #ff6b45 100px), repeating-linear-gradient(#e74c3c, #ff6b45);
             background-color: #ff6b45;
+        }
+        /* Gradient background */
+        .bg-gradient-pattern {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%);
         }
         .text-primary { color: #e74c3c; font-weight: bold; }
         .bg-primary { background-color: #FF6B45; }
         .bg-light { background-color: #f9f9f9; }
+        
+        /* Days remaining badge */
+        .days-badge {
+            background-color: white;
+            border-radius: 8px;
+            padding: 2px 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            position: absolute;
+            top: 3px;
+            right: 10px;
+            font-size: 12px;
+        }
         
         /* Custom scrollbar */
         ::-webkit-scrollbar { width: 8px; }
@@ -79,75 +107,67 @@ while ($row = $attendance_data->fetch_assoc()) {
     <!-- Include sidebar -->
     <?php include 'includes/sidebar.php'; ?>
     
-    
     <!-- Main Content -->
     <div id="content-wrapper" class="ml-0 lg:ml-64 min-h-screen transition-all duration-300">
         <!-- Top Navigation -->
-        <header  class=" shadow-sm">
-
-            <div class="flex justify-between items-center px-4 py-3 lg:px-6">
-                <h1 class="text-xl font-semibold text-gray-800">Dashboard</h1>
-                <div class="flex items-center space-x-4">
-                    <div class="relative">
-                        <button class="p-1 text-gray-500 hover:text-gray-700 focus:outline-none">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
-                            </svg>
-                        </button>
-                        <span class="absolute top-0 right-0 h-2 w-2 rounded-full bg-primary"></span>
-                    </div>
-                    <div class="flex items-center">
-                        <span class="text-sm text-gray-700 mr-2 hidden sm:inline-block">
-                            <?php echo htmlspecialchars(string: $customer['first_name'] . ' ' . $customer['last_name']); ?>
-                        </span>
-                        <div class="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600">
-                            <?php echo strtoupper(substr($customer['first_name'], 0, 1)); ?>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </header>
-        
+      
         <!-- Dashboard Content -->
         <main class="p-4 lg:p-6">
-         <!-- Welcome Banner -->
-<div id="head" class=" rounded-2xl shadow-sm overflow-hidden mb-6">
-    <div class="p-6 flex flex-col md:flex-row items-center">
-        <div class="md:w-2/3 mb-4 md:mb-0 md:pr-6">
-            <h2 class="text-2xl font-bold text-gray-200 mb-2">    <p class="text-gray-200 mb-4 uppercase">
-                
-                <?php echo htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name']); ?>
-            
-        </p></h2>
-        
-            <div class="flex flex-wrap gap-2">
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-primary text-white">
-                    <?php echo ucfirst(str_replace('_', ' ', $customer['fitness_goal'] ?? 'General Fitness')); ?>
-                </span>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800">
-                    <?php echo ucfirst($customer['subscription_type'] ?? 'Monthly'); ?> Plan
-                </span>
-            </div>
-        </div>
-        <div class="md:w-1/3 flex justify-center">
-            <?php if (!empty($customer['profile_image'])): ?>
-                <img class="h-40 w-auto object-cover rounded-lg" src="<?php echo '../' . htmlspecialchars($customer['profile_image']); ?>" alt="Profile">
-            <?php else: ?>
-                <div class="h-40 w-40 rounded-lg bg-gray-200 flex items-center justify-center text-gray-600 text-6xl">
-                    <?php echo strtoupper(substr($customer['first_name'], 0, 1)); ?>
+            <!-- Welcome Banner -->
+            <div id="head" class="rounded-3xl shadow-sm overflow-hidden mb-6 relative">
+                <!-- Days remaining badge -->
+                <?php if (!$is_expired && $days_remaining > 0): ?>
+                <div class="p-1  mb-8 days-badge">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-primary">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                    </svg>
+                    <span class="font-medium text-orange-700"><?php echo $days_remaining; ?> days left</span>
                 </div>
-            <?php endif; ?>
-        </div>
-    </div>
-</div>
+                <?php elseif ($is_expired): ?>
+                <div class="days-badge bg-red-50">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-red-500">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                    <span class="font-medium text-red-600">Expired</span>
+                </div>
+                <?php endif; ?>
+                
+                <div class="p-6 flex flex-col md:flex-row items-center">
+                    <div class="md:w-2/3 mb-4 md:mb-0 md:pr-6">
+                        <h2 class="text-2xl font-bold text-white mb-2">
+                            <p class="text-white mb-4 uppercase">
+                                <?php echo htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name']); ?>
+                            </p>
+                        </h2>
+                        
+                        <div class="flex flex-wrap gap-2">
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-white bg-opacity-20 text-white">
+                                <?php echo ucfirst(str_replace('_', ' ', $customer['fitness_goal'] ?? 'General Fitness')); ?>
+                            </span>
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-white bg-opacity-20 text-white">
+                                <?php echo ucfirst($customer['subscription_type'] ?? 'Monthly'); ?> Plan
+                            </span>
+                        </div>
+                    </div>
+                    <div class="md:w-1/3 flex justify-center">
+                        <?php if (!empty($customer['profile_image'])): ?>
+                            <img class="h-40 w-40 object-cover rounded-lg" src="<?php echo '../' . htmlspecialchars($customer['profile_image']); ?>" alt="Profile">
+                        <?php else: ?>
+                            <div class="h-40 w-40 rounded-lg bg-white bg-opacity-20 flex items-center justify-center text-white text-6xl">
+                                <?php echo strtoupper(substr($customer['first_name'], 0, 1)); ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
             
             <!-- Stats Cards -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
                 <!-- Membership Status -->
                 <div class="bg-white rounded-lg shadow-sm p-6">
                     <div class="flex items-center">
-                        <div class="p-3 rounded-full bg-red-100 mr-4">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6 text-primary">
+                        <div class="p-3 rounded-full bg-gray-100 mr-4">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6" style="color: #FF6B45;">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         </div>
@@ -163,7 +183,7 @@ while ($row = $attendance_data->fetch_assoc()) {
                 <!-- Membership Type -->
                 <div class="bg-white rounded-lg shadow-sm p-6">
                     <div class="flex items-center">
-                        <div class="p-3 rounded-full bg-orange-100 mr-4">
+                        <div class="p-3 rounded-full bg-gray-100 mr-4">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6" style="color: #FF6B45;">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
                             </svg>
@@ -180,8 +200,8 @@ while ($row = $attendance_data->fetch_assoc()) {
                 <!-- Expiry Date -->
                 <div class="bg-white rounded-lg shadow-sm p-6">
                     <div class="flex items-center">
-                        <div class="p-3 rounded-full bg-blue-100 mr-4">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6 text-blue-500">
+                        <div class="p-3 rounded-full bg-gray-100 mr-4">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6" style="color: #FF6B45;">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
                             </svg>
                         </div>
@@ -197,8 +217,8 @@ while ($row = $attendance_data->fetch_assoc()) {
                 <!-- Workouts -->
                 <div class="bg-white rounded-lg shadow-sm p-6">
                     <div class="flex items-center">
-                        <div class="p-3 rounded-full bg-green-100 mr-4">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6 text-green-500">
+                        <div class="p-3 rounded-full bg-gray-100 mr-4">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6" style="color: #FF6B45;">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
                             </svg>
                         </div>
@@ -213,46 +233,79 @@ while ($row = $attendance_data->fetch_assoc()) {
             </div>
             
             <!-- Quick Actions -->
-            <div class="bg-white rounded-lg shadow-sm p-6 mb-6">
-                <h3 class="text-lg font-semibold text-gray-800 mb-4">Quick Actions</h3>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <a href="classes.php" class="flex flex-col items-center justify-center p-4 bg-light rounded-lg hover:bg-gray-200 transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-8 h-8 mb-2" style="color: #FF6B45;">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                        </svg>
-                        <span class="text-sm font-medium text-gray-700">Book Class</span>
-                    </a>
-                    
-                    <a href="workouts.php" class="flex flex-col items-center justify-center p-4 bg-light rounded-lg hover:bg-gray-200 transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-8 h-8 mb-2" style="color: #FF6B45;">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18a3.75 3.75 0 00.495-7.467 5.99 5.99 0 00-1.925 3.546 5.974 5.974 0 01-2.133-1A3.75 3.75 0 0012 18z" />
-                        </svg>
-                        <span class="text-sm font-medium text-gray-700">Start Workout</span>
-                    </a>
-                    
-                    <a href="profile.php" class="flex flex-col items-center justify-center p-4 bg-light rounded-lg hover:bg-gray-200 transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-8 h-8 mb-2" style="color: #FF6B45;">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                        </svg>
-                        <span class="text-sm font-medium text-gray-700">Update Profile</span>
-                    </a>
-                    
-                    <a href="membership.php" class="flex flex-col items-center justify-center p-4 bg-light rounded-lg hover:bg-gray-200 transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-8 h-8 mb-2" style="color: #FF6B45;">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
-                        </svg>
-                        <span class="text-sm font-medium text-gray-700">Renew Membership</span>
+          
+        
+            <!-- Recent Activity -->
+            <div class="bg-white rounded-lg shadow-sm p-6 mt-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold text-gray-800">Recent Activity</h3>
+                    <a href="activity.php" class="text-sm text-primary hover:underline">View All</a>
+                </div>
+                
+                <?php if (count($attendance_dates) > 0): ?>
+                <div class="space-y-3">
+                    <?php for ($i = 0; $i < min(3, count($attendance_dates)); $i++): ?>
+                    <div class="flex items-center p-3 bg-light rounded-lg">
+                        <div class="p-3 rounded-full bg-gray-100 mr-4">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5" style="color: #FF6B45;">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+                            </svg>
+                        </div>
+                        <div class="flex-1">
+                            <h4 class="font-medium text-gray-800">Workout Session</h4>
+                            <p class="text-sm text-gray-500"><?php echo $attendance_dates[$i]; ?></p>
+                        </div>
+                        <span class="text-sm text-gray-500"><?php echo $attendance_counts[$i]; ?> check-ins</span>
+                    </div>
+                    <?php endfor; ?>
+                </div>
+                <?php else: ?>
+                <div class="text-center py-8">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-12 h-12 mx-auto text-gray-300 mb-3">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+                    </svg>
+                    <p class="text-gray-500">No recent activity found</p>
+                    <a href="workouts.php" class="mt-3 inline-block px-4 py-2 bg-primary text-white rounded-md hover:bg-opacity-90 transition-colors">
+                        Start a Workout
                     </a>
                 </div>
-            </div>
-            
-            <!-- Two Column Layout -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-         
-           
+                <?php endif; ?>
             </div>
         </main>
     </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Toggle sidebar on mobile
+            const sidebarToggle = document.getElementById('sidebar-toggle');
+            const sidebar = document.getElementById('sidebar');
+            const contentWrapper = document.getElementById('content-wrapper');
+            
+            if (sidebarToggle && sidebar && contentWrapper) {
+                sidebarToggle.addEventListener('click', function() {
+                    sidebar.classList.toggle('translate-x-0');
+                    sidebar.classList.toggle('-translate-x-full');
+                    
+                    if (window.innerWidth >= 1024) {
+                        contentWrapper.classList.toggle('ml-0');
+                        contentWrapper.classList.toggle('ml-64');
+                    }
+                });
+            }
+            
+            // Close sidebar when clicking outside on mobile
+            document.addEventListener('click', function(event) {
+                if (window.innerWidth < 1024 && 
+                    sidebar && 
+                    !sidebar.contains(event.target) && 
+                    sidebarToggle && 
+                    !sidebarToggle.contains(event.target) &&
+                    sidebar.classList.contains('translate-x-0')) {
+                    sidebar.classList.remove('translate-x-0');
+                    sidebar.classList.add('-translate-x-full');
+                }
+            });
+        });
+    </script>
 </body>
 </html>
