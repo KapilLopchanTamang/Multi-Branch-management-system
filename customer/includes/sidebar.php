@@ -4,7 +4,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
 ?>
 
 <!-- Mobile Bottom Navigation Bar -->
-<div id="bottom-nav" class="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t border-gray-200 z-20">
+<div id="bottom-nav" class="fixed bottom-0 left-0 right-0  shadow-lg border-t border-gray-200 z-20">
     <div class="flex justify-around items-center h-16">
         <!-- Dashboard -->
         <a href="dashboard.php" class="flex flex-col items-center justify-center w-full h-full <?php echo $current_page == 'dashboard.php' ? 'text-[#FF6B45]' : 'text-gray-600'; ?>">
@@ -128,6 +128,9 @@ $current_page = basename($_SERVER['PHP_SELF']);
     
     .animate-slide-up {
         animation: slide-up 0.3s ease-out;
+    }
+    #botton-nav{
+        
     }
 </style>
 
