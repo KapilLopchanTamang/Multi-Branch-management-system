@@ -191,6 +191,23 @@ $customer_count = $customer_data['customer_count'];
                     </div>
                 </div>
                 
+                <!-- QR Code Scanner Card -->
+                <div class="section" style="margin-bottom: 30px;">
+                    <div class="section-header">
+                        <h2><i class="fas fa-qrcode"></i> Quick Check-In</h2>
+                        <a href="attendance.php" class="add-btn">
+                            <i class="fas fa-clipboard-check"></i> Full Attendance
+                        </a>
+                    </div>
+                    
+                    <div style="background-color: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); text-align: center;">
+                        <p style="margin-bottom: 15px;">Scan customer QR codes for instant check-in</p>
+                        <a href="attendance.php" class="action-button" style="display: inline-block;">
+                            <i class="fas fa-camera"></i> Open Scanner
+                        </a>
+                    </div>
+                </div>
+                
                 <!-- Customer Overview section -->
                 <div class="section">
                     <div class="section-header">

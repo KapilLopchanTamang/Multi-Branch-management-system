@@ -627,13 +627,27 @@ $stats = $stmt->get_result()->fetch_assoc();
                         <!-- QR Scanner -->
                         <div class="qr-scanner">
                             <h3><i class="fas fa-qrcode"></i> QR Code Scanner</h3>
-                            <div class="scanner-placeholder">
-                                <i class="fas fa-qrcode"></i>
-                                <p>Scan customer QR code for quick check-in</p>
+                            <div id="scanner-container">
+                                <div id="scanner-placeholder" class="scanner-placeholder">
+                                    <i class="fas fa-qrcode"></i>
+                                    <p>Scan customer QR code for quick check-in</p>
+                                </div>
+                                <video id="qr-video" style="display: none; width: 100%; border-radius: 8px;"></video>
+                                <canvas id="qr-canvas" style="display: none;"></canvas>
+                                <div id="scanner-overlay" style="display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; border: 2px solid #4CAF50; border-radius: 8px; pointer-events: none;"></div>
                             </div>
-                            <button class="scan-btn">
-                                <i class="fas fa-camera"></i> Start Scanner
-                            </button>
+                            <div id="scan-result" style="margin-top: 10px; display: none; padding: 10px; background-color: #f9f9f9; border-radius: 4px; text-align: left;">
+                                <p><strong>Customer:</strong> <span id="scanned-customer-name">Not detected</span></p>
+                                <p><strong>Status:</strong> <span id="scan-status">Ready to scan</span></p>
+                            </div>
+                            <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center;">
+                                <button id="start-scan-btn" class="scan-btn">
+                                    <i class="fas fa-camera"></i> Start Scanner
+                                </button>
+                                <button id="stop-scan-btn" class="scan-btn" style="display: none; background-color: #f44336;">
+                                    <i class="fas fa-stop"></i> Stop Scanner
+                                </button>
+                            </div>
                         </div>
                         
                         <!-- Attendance Statistics -->
@@ -973,6 +987,243 @@ $stats = $stmt->get_result()->fetch_assoc();
             // You can add select2 or similar library initialization here
             // For now, we'll just focus on the core functionality
         });
+    </script>
+
+    <!-- Include jsQR library for QR code scanning -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+
+    <script>
+        // QR Scanner functionality
+        let video = document.getElementById('qr-video');
+        let canvasElement = document.getElementById('qr-canvas');
+        let canvas = canvasElement.getContext('2d');
+        let scannerPlaceholder = document.getElementById('scanner-placeholder');
+        let startScanButton = document.getElementById('start-scan-btn');
+        let stopScanButton = document.getElementById('stop-scan-btn');
+        let scanResult = document.getElementById('scan-result');
+        let scanStatus = document.getElementById('scan-status');
+        let scannedCustomerName = document.getElementById('scanned-customer-name');
+        
+        let scanning = false;
+        
+        // Start QR scanner
+        startScanButton.addEventListener('click', () => {
+            startScanner();
+        });
+        
+        // Stop QR scanner
+        stopScanButton.addEventListener('click', () => {
+            stopScanner();
+        });
+        
+        function startScanner() {
+            // Request camera access
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                .then(function(stream) {
+                    scanning = true;
+                    scannerPlaceholder.style.display = 'none';
+                    video.style.display = 'block';
+                    startScanButton.style.display = 'none';
+                    stopScanButton.style.display = 'inline-flex';
+                    scanResult.style.display = 'block';
+                    scanStatus.textContent = 'Scanning...';
+                    
+                    video.srcObject = stream;
+                    video.setAttribute('playsinline', true); // Required for iOS
+                    video.play();
+                    requestAnimationFrame(tick);
+                })
+                .catch(function(err) {
+                    console.error('Error accessing camera:', err);
+                    alert('Error accessing camera: ' + err.message);
+                    scanning = false;
+                });
+        }
+        
+        function stopScanner() {
+            scanning = false;
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
+            video.style.display = 'none';
+            scannerPlaceholder.style.display = 'flex';
+            startScanButton.style.display = 'inline-flex';
+            stopScanButton.style.display = 'none';
+            scanStatus.textContent = 'Scanner stopped';
+        }
+        
+        // Improve the tick function for better QR code detection
+        function tick() {
+            if (!scanning) return;
+            
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvasElement.height = video.videoHeight;
+                canvasElement.width = video.videoWidth;
+                canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+                var imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+                
+                try {
+                    var code = jsQR(imageData.data, imageData.width, imageData.height, {
+                        inversionAttempts: "dontInvert",
+                    });
+                    
+                    if (code) {
+                        // QR code detected
+                        console.log("QR Code detected:", code.data);
+                        
+                        // Highlight the QR code
+                        if (code.location) {
+                            drawQRCodeOutline(code.location);
+                        }
+                        
+                        // Check if the QR code data is a valid customer ID
+                        if (isValidQRCode(code.data)) {
+                            // Extract customer ID from QR code
+                            const customerId = extractCustomerId(code.data);
+                            
+                            if (customerId) {
+                                // Find customer name from the select dropdown
+                                const customerSelect = document.getElementById('customer_id');
+                                let customerName = "Unknown";
+                                
+                                for (let i = 0; i < customerSelect.options.length; i++) {
+                                    if (customerSelect.options[i].value == customerId) {
+                                        customerName = customerSelect.options[i].text;
+                                        break;
+                                    }
+                                }
+                                
+                                // Update the UI
+                                scannedCustomerName.textContent = customerName;
+                                scanStatus.textContent = "Processing check-in...";
+                                
+                                // Automatically check in the customer
+                                if (checkInCustomer(customerId)) {
+                                    // Play a success sound
+                                    playBeepSound();
+                                    
+                                    // Stop scanning after successful scan
+                                    stopScanner();
+                                    return;
+                                }
+                            } else {
+                                scanStatus.textContent = "Invalid customer ID in QR code";
+                            }
+                        } else {
+                            scanStatus.textContent = "Invalid QR code format. Please try again.";
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error processing QR code:", error);
+                }
+            }
+            
+            requestAnimationFrame(tick);
+        }
+
+        // Add function to draw outline around detected QR code
+        function drawQRCodeOutline(location) {
+            const overlayCanvas = document.createElement('canvas');
+            overlayCanvas.width = canvasElement.width;
+            overlayCanvas.height = canvasElement.height;
+            const overlayCtx = overlayCanvas.getContext('2d');
+            
+            overlayCtx.beginPath();
+            overlayCtx.moveTo(location.topLeftCorner.x, location.topLeftCorner.y);
+            overlayCtx.lineTo(location.topRightCorner.x, location.topRightCorner.y);
+            overlayCtx.lineTo(location.bottomRightCorner.x, location.bottomRightCorner.y);
+            overlayCtx.lineTo(location.bottomLeftCorner.x, location.bottomLeftCorner.y);
+            overlayCtx.closePath();
+            overlayCtx.lineWidth = 4;
+            overlayCtx.strokeStyle = '#4CAF50';
+            overlayCtx.stroke();
+            
+            // Add temporary visual feedback
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = canvasElement.width;
+            tempCanvas.height = canvasElement.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            tempCtx.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+            tempCtx.drawImage(overlayCanvas, 0, 0);
+            
+            // Display the frame with the QR code highlighted
+            canvas.drawImage(tempCanvas, 0, 0);
+        }
+
+        // Add function to play a beep sound when QR code is detected
+        function playBeepSound() {
+            try {
+                const beep = new Audio("data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU" + Array(1000).join("123"));
+                beep.volume = 0.2;
+                beep.play();
+            } catch (e) {
+                console.log("Audio playback failed:", e);
+            }
+        }
+
+        // Improve the QR code scanner functionality to better handle customer detection
+        function isValidQRCode(qrData) {
+            // Check if the QR code data is in the expected format
+            // Format: "GYM_CUSTOMER_ID:{id}"
+            return qrData && qrData.startsWith("GYM_CUSTOMER_ID:") && qrData.length > 15;
+        }
+
+        function extractCustomerId(qrData) {
+            // Extract the customer ID from the QR code data
+            // Format: "GYM_CUSTOMER_ID:{id}"
+            try {
+                return qrData.split(":")[1].trim();
+            } catch (error) {
+                console.error("Error extracting customer ID from QR code:", error);
+                return null;
+            }
+        }
+
+        function checkInCustomer(customerId) {
+            // Set the customer ID in the select dropdown
+            const customerSelect = document.getElementById('customer_id');
+            
+            // Verify the customer ID exists in the dropdown
+            let customerExists = false;
+            let customerName = "Unknown";
+            
+            for (let i = 0; i < customerSelect.options.length; i++) {
+                if (customerSelect.options[i].value == customerId) {
+                    customerExists = true;
+                    customerName = customerSelect.options[i].text;
+                    customerSelect.selectedIndex = i;
+                    break;
+                }
+            }
+            
+            if (!customerExists) {
+                scanStatus.textContent = "Error: Customer ID not found in this branch";
+                return false;
+            }
+            
+            // Add a note that this was a QR code check-in
+            document.getElementById('notes').value = "Checked in via QR code scanner";
+            
+            // Update the UI
+            scannedCustomerName.textContent = customerName;
+            scanStatus.textContent = "Processing check-in...";
+            
+            // Submit the check-in form
+            setTimeout(() => {
+                document.querySelector('button[name="check_in"]').click();
+            }, 1000);
+            
+            return true;
+        }
+
+        // Function to generate QR code URL for a customer
+        function generateCustomerQRCode(customerId) {
+            // This generates a URL for a QR code with the format "GYM_CUSTOMER_ID:{id}"
+            const qrData = `GYM_CUSTOMER_ID:${customerId}`;
+            const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrData)}`;
+            return qrCodeUrl;
+        }
     </script>
 </body>
 </html>

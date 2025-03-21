@@ -82,7 +82,7 @@ $subscription_types = [
 $subscription_text = $subscription_types[$customer['subscription_type'] ?? 'monthly'];
 ?>
 
-
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -371,7 +371,7 @@ $subscription_text = $subscription_types[$customer['subscription_type'] ?? 'mont
 </head>
 <body>
   <div class="dashboard-container">
-      
+      <!-- Sidebar -->
       <div class="sidebar">
           <div class="logo">
               <h2>Gym Network</h2>
@@ -388,7 +388,7 @@ $subscription_text = $subscription_types[$customer['subscription_type'] ?? 'mont
           </div>
       </div>
       
-      
+      <!-- Main Content -->
       <div class="main-content">
           <div class="header">
               <div class="page-title">
@@ -402,7 +402,7 @@ $subscription_text = $subscription_types[$customer['subscription_type'] ?? 'mont
               </div>
           </div>
           
-          
+          <!-- Dashboard Content -->
           <div class="dashboard-content">
               <a href="customers.php" class="back-btn">
                   <i class="fas fa-arrow-left"></i> Back to Customers
@@ -502,6 +502,28 @@ $subscription_text = $subscription_types[$customer['subscription_type'] ?? 'mont
                           
                           <div class="profile-card">
                               <div class="info-section">
+                                  <h3>Customer QR Code</h3>
+                                  <div style="text-align: center; margin: 20px 0;">
+                                      <div style="border: 1px solid #ddd; padding: 15px; border-radius: 8px; display: inline-block; background-color: white;">
+                                          <img id="customer-qr-code" src="/placeholder.svg" alt="Customer QR Code" style="max-width: 200px; height: auto;">
+                                          <p style="margin-top: 10px; font-weight: bold;"><?php echo htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name']); ?></p>
+                                          <p style="margin-top: 5px; font-size: 12px; color: #777;">ID: <?php echo $customer['id']; ?></p>
+                                      </div>
+                                      <p style="margin-top: 15px; font-size: 14px; color: #555;">
+                                          <i class="fas fa-info-circle"></i> Scan this QR code at the reception desk for quick check-in
+                                      </p>
+                                      <button onclick="printQRCode()" style="margin-top: 10px; padding: 8px 15px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">
+                                          <i class="fas fa-print"></i> Print QR Code
+                                      </button>
+                                      <button onclick="generateQRCode()" style="margin-top: 10px; margin-left: 10px; padding: 8px 15px; background-color: #e8f5e9; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; color: #388e3c;">
+                                          <i class="fas fa-sync-alt"></i> Regenerate QR Code
+                                      </button>
+                                  </div>
+                              </div>
+                          </div>
+                          
+                          <div class="profile-card">
+                              <div class="info-section">
                                   <h3>Fitness Summary</h3>
                                   <div class="info-item">
                                       <div class="info-label">Total Workouts:</div>
@@ -587,7 +609,7 @@ $subscription_text = $subscription_types[$customer['subscription_type'] ?? 'mont
       </div>
   </div>
 
-  &lt;!-- Edit Customer Modal -->
+  <!-- Edit Customer Modal -->
   <div id="editCustomerModal" class="modal">
       <div class="modal-content">
           <span class="close" onclick="closeEditCustomerModal()">&times;</span>
@@ -660,7 +682,7 @@ $subscription_text = $subscription_types[$customer['subscription_type'] ?? 'mont
                   <p class="password-hint">Must be at least 8 characters</p>
               </div>
               
-              &lt;!-- Hidden field for branch -->
+              <!-- Hidden field for branch -->
               <input type="hidden" name="branch" value="<?php echo htmlspecialchars($admin['branch_name']); ?>">
               
               <button type="submit" class="submit-btn">Update Customer</button>
@@ -668,7 +690,7 @@ $subscription_text = $subscription_types[$customer['subscription_type'] ?? 'mont
       </div>
   </div>
 
-  &lt;!-- Delete Confirmation Modal -->
+   Delete Confirmation Modal -->
   <div id="deleteConfirmModal" class="modal">
       <div class="modal-content" style="max-width: 400px;">
           <span class="close" onclick="closeDeleteConfirmModal()">&times;</span>
@@ -700,7 +722,7 @@ $subscription_text = $subscription_types[$customer['subscription_type'] ?? 'mont
           document.getElementById(tabId).classList.add('active');
           
           // Add active class to clicked tab item
-          event.target.classList.add('active');
+          document.querySelector(`.tab-item[onclick="showTab('${tabId}')"]`).classList.add('active');
       }
       
       // Modal functions
@@ -755,6 +777,117 @@ $subscription_text = $subscription_types[$customer['subscription_type'] ?? 'mont
               event.target.style.display = 'none';
           }
       }
+
+      // Generate and display QR code for this customer
+      function generateQRCode() {
+          const customerId = <?php echo $customer['id']; ?>;
+          const customerName = "<?php echo htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name']); ?>";
+          const qrData = `GYM_CUSTOMER_ID:${customerId}`;
+          
+          // Use a more reliable QR code generation service
+          const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrData)}&margin=10`;
+          
+          // Set the QR code image source
+          const qrImage = document.getElementById('customer-qr-code');
+          qrImage.src = qrCodeUrl;
+          qrImage.alt = `${customerName} QR Code`;
+      }
+
+      // Print QR code
+function printQRCode() {
+    const customerId = <?php echo $customer['id']; ?>;
+    const customerName = "<?php echo htmlspecialchars($customer['first_name'] . ' ' . $customer['last_name']); ?>";
+    const branchName = "<?php echo htmlspecialchars($admin['branch_name']); ?>";
+    const qrCodeImg = document.getElementById('customer-qr-code').src;
+    
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+        <html>
+        <head>
+            <title>Gym Membership QR Code - ${customerName}</title>
+            <style>
+                body { 
+                    font-family: Arial, sans-serif; 
+                    text-align: center; 
+                    padding: 20px;
+                    margin: 0;
+                }
+                .qr-container { 
+                    margin: 0 auto; 
+                    max-width: 400px; 
+                    padding: 20px;
+                    border: 2px solid #ddd;
+                    border-radius: 10px;
+                }
+                .logo {
+                    font-size: 24px;
+                    font-weight: bold;
+                    margin-bottom: 5px;
+                    color: #ff6b45;
+                }
+                .branch {
+                    font-size: 14px;
+                    color: #555;
+                    margin-bottom: 20px;
+                }
+                img { 
+                    max-width: 100%;
+                    border: 1px solid #eee;
+                    padding: 10px;
+                    background: white;
+                }
+                h2 { 
+                    margin-bottom: 5px; 
+                    color: #333;
+                }
+                .member-id {
+                    font-size: 14px;
+                    color: #777;
+                    margin-bottom: 20px;
+                }
+                .instructions {
+                    font-size: 14px;
+                    color: #555;
+                    margin-top: 20px;
+                    padding: 10px;
+                    background-color: #f9f9f9;
+                    border-radius: 5px;
+                }
+                @media print {
+                    .no-print {
+                        display: none;
+                    }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="qr-container">
+                <div class="logo">Gym Network</div>
+                <div class="branch">${branchName} Branch</div>
+                <h2>${customerName}</h2>
+                <div class="member-id">Member ID: ${customerId}</div>
+                <img src="${qrCodeImg}" alt="Customer QR Code">
+                <div class="instructions">
+                    <p>Scan this code at the reception desk for quick check-in</p>
+                </div>
+            </div>
+            <div class="no-print" style="margin-top: 20px;">
+                <button onclick="window.print()" style="padding: 10px 20px; background-color: #ff6b45; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    Print QR Code
+                </button>
+                <button onclick="window.close()" style="padding: 10px 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; margin-left: 10px; cursor: pointer;">
+                    Close
+                </button>
+            </div>
+        </body>
+        </html>
+    `);
+    printWindow.document.close();
+}
+      // Initialize QR code on page load
+      document.addEventListener('DOMContentLoaded', function() {
+          generateQRCode();
+      });
   </script>
 </body>
 </html>
